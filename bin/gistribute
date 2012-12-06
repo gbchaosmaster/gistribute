@@ -1,5 +1,10 @@
 #!/usr/bin/env ruby
 
+if %w[-v --version].include? ARGV.first
+  puts "Gistribute #{File.read(File.expand_path("../../VERSION", __FILE__)).strip}"
+  exit 0
+end
+
 require "json"
 require "open-uri"
 require "colorize"
@@ -7,18 +12,22 @@ require "nutella"
 
 print "Downloading data..."
 
+# The user can paste in either just the ID or the entire URL to the Gist.
+id = ARGV.first[/(^|\/)([[:xdigit:]]+)/, 2]
+
 begin
-  # TODO: Let the user paste the entire Gist URL and parse out the ID.
-  gist = JSON.parse open("https://api.github.com/gists/#{ARGV.first}").read
+  gist = JSON.parse open("https://api.github.com/gists/#{id}").read
 rescue OpenURI::HTTPError => msg
-  puts <<-EOS.heredoc.red
+  print <<-EOS.heredoc.red
 
 
     There was an error downloading the requested Gist.
     The error is as follows:
   EOS
-
   puts msg
+
+  puts "The ID that was queried is:".red
+  puts id
 
   exit -1
 end
@@ -43,19 +52,19 @@ end
 #   }
 # }
 
-user = gist["user"] ? "user #{gist["user"]["login"]}" : "an anonymous user"
-
 puts <<-EOS.heredoc
 
 
   Finished downloading Gist from: #{gist["html_url"]}
-  Gist uploaded by #{user}.
+  Gist uploaded by #{
+    gist["user"] ? "user #{gist["user"]["login"]}" : "an anonymous user"
+  }.
 
   Beginning install...
 EOS
 
 gist["files"].each do |filename, data|
-  lines = data["content"].split "\n"
+  lines = data["content"].lines.to_a
 
   # Parse out all metadata after %% on the first two lines, strip out
   # (lead|trail)ing whitespace while we're at it.
@@ -66,10 +75,15 @@ gist["files"].each do |filename, data|
 
   puts " #{"*".green} Installing #{metadata[1] || filename}..."
 
-  # TODO: Handle ~ better. Also, handle EOF newlines.
-  File.open(metadata.first.gsub(/~/, Dir.home), "w") do |f|
+  # TODO: Is there a better way to handle ~?
+  path = metadata.first.gsub "~", Dir.home
+
+  # Handle directories that don't exist.
+  FileUtils.mkdir_p File.dirname(path)
+
+  File.open(path, "w") do |f|
     # Remove all lines with metadata- lines that don't match will return nil,
     # so compact it and drop that many off the top of the file.
-    f << lines[metadata.compact.size..-1].join("\n")
+    f << lines[metadata.compact.size..-1].join
   end
 end
